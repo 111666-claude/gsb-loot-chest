@@ -1,5 +1,4 @@
 // Package chest 是宝箱：钥匙消耗、周期内次数上限、到期刷新与开启幂等。
-// 缺陷：不扣钥匙、不看次数上限、不刷新周期、请求不幂等、每次查询遍历全部宝箱。
 package chest
 
 // Chests 是宝箱台账。
@@ -22,16 +21,42 @@ func New(maxOpens int, refreshMs int64) *Chests {
 // AddKeys 给玩家发钥匙。
 func (c *Chests) AddKeys(player string, n int) { c.keys[player] += n }
 
+// refresh 到期则清零已开次数，并把周期起点顺延到当前时刻。
+func (c *Chests) refresh(chest string, nowMs int64) {
+	if c.opens[chest] > 0 && nowMs-c.started[chest] >= c.refreshMs {
+		c.opens[chest] = 0
+		c.started[chest] = nowMs
+	}
+}
+
 // Open 尝试开启一个宝箱。
 func (c *Chests) Open(player, chest string, nowMs int64, reqID string) bool {
-	c.scanned += len(c.opens)
-	c.memo[reqID] = true
+	c.scanned++
+	if c.memo[reqID] {
+		return false
+	}
+	c.refresh(chest, nowMs)
+	if c.opens[chest] >= c.maxOpens {
+		return false
+	}
+	if c.keys[player] <= 0 {
+		return false
+	}
+	c.keys[player]--
+	if c.opens[chest] == 0 {
+		c.started[chest] = nowMs
+	}
 	c.opens[chest]++
+	c.memo[reqID] = true
 	return true
 }
 
 // Opens 返回该宝箱在本周期已开次数。
-func (c *Chests) Opens(chest string, nowMs int64) int { return c.opens[chest] }
+func (c *Chests) Opens(chest string, nowMs int64) int {
+	c.scanned++
+	c.refresh(chest, nowMs)
+	return c.opens[chest]
+}
 
 // Keys 返回玩家剩余钥匙。
 func (c *Chests) Keys(player string) int { return c.keys[player] }
